@@ -1,5 +1,10 @@
 # D-Link DGS-1510-52 setup / config
 #
+# Poort 49: SFP-poort — Maximaal 1 Gbps
+# Poort 50: SFP-poort — Maximaal 1 Gbps
+# Poort 51: SFP+ poort — Maximaal 10 Gbps
+# Poort 52: SFP+ poort — Maximaal 10 Gbps
+#
 # De "Paperclip Executie" Stappen:
 # Zoek het gaatje: Aan de voorkant zit een 
 # klein gaatje met de tekst "Reset".
