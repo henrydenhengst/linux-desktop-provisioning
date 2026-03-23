@@ -1,0 +1,32 @@
+---
+- name: "The Gold Standard Linux Desktop"
+  hosts: localhost
+  connection: local
+  become: yes
+  vars:
+    font_size: 11
+    # Systeem-pakketten (Open Source Core)
+    core_pkgs: [micro, vim, kitty, terminator, eza, bat, fzf, jq, btop, curl, git, flatpak]
+    
+  tasks:
+    - name: "Installeren van Core Systeem Tools"
+      ansible.builtin.package: { name: "{{ core_pkgs }}", state: present }
+
+    - name: "Flatpak Repo toevoegen"
+      community.general.flatpak_remote:
+        name: flathub
+        state: present
+        flatpakrepo_url: https://dl.flathub.org/repo/flathub.flatpakrepo
+
+    - name: "Installeren Media Stack (Flatpak voor stabiliteit)"
+      community.general.flatpak:
+        name: "{{ item }}"
+        state: present
+      loop: [ "org.kde.kdenlive", "com.obsproject.Studio", "org.blender.Blender", "org.gimp.GIMP" ]
+      tags: media
+
+    - name: "Nord-Thema Injectie (Kdenlive/OBS)"
+      ansible.builtin.file:
+        path: "~/.var/app/{{ item }}/config"
+        state: directory
+      loop: [ "org.kde.kdenlive", "com.obsproject.Studio" ]
