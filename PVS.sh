@@ -2,162 +2,90 @@
 set -euo pipefail
 
 # ==============================================================================
-# CONFIGURATIE (Origineel + PVS)
+# CONFIGURATIE (De basis voor je €900/uur marge)
 # ==============================================================================
-INTERFACE="eth0"
 SERVER_IP="192.168.10.1"
-DHCP_RANGE_START="192.168.10.100"
-DHCP_RANGE_END="192.168.10.200"
-SSH_PORT=22
-GIT_REPO="https://YOUR_GIT_REPO.git"
+GIT_REPO="https://YOUR_GIT_REPO.git" # PAS DIT AAN NAAR JE EIGEN REPO!
 BASE_DIR="/opt/pvs"
 REPO_DIR="/opt/gitops/repo"
 
-echo "===> FOCUS: Transformatie naar PVS Productiestraat v1.0"
+echo "===> START: BOUW VAN DE LINUX-MACHINE VOOR 6 DESKTOPS PER UUR"
 
-# ==============================================================================
-# STAP 1 & 2: SYSTEEM UPDATE, SSH & FIREWALL
-# ==============================================================================
+# 1. SYSTEEM & DEPENDENCIES
 apt-get update && apt-get upgrade -y
-apt-get install -y curl wget git vim htop ufw nfs-kernel-server \
-    apt-transport-https ca-certificates gnupg lsb-release software-properties-common
+apt-get install -y curl wget git vim ufw docker.io docker-compose-v2 nfs-kernel-server
 
-# SSH Hardening (Origineel)
-sed -i 's/^#PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/sshd_config || true
-systemctl restart ssh
-
-# Firewall (Alle poorten uit je originele script)
-ufw allow ${SSH_PORT}/tcp
-ufw allow 67/udp && ufw allow 68/udp
-ufw allow 69/udp
-ufw allow 80,8080,3000/tcp
-ufw allow 2049/tcp
+# 2. FIREWALL VOOR PRODUCTIE (Alles open voor imaging & printers)
+ufw allow 22,67,68,69,80,8080,2049,3000,5353/udp
 ufw --force enable
 
-# ==============================================================================
-# STAP 3 & 4: DOCKER & NETBOOT.XYZ
-# ==============================================================================
-if ! command -v docker &> /dev/null; then
-    curl -fsSL https://get.docker.com -o get-docker.sh && sh get-docker.sh
-fi
-
+# 3. NETBOOT.XYZ SETUP (De voordeur voor je desktops)
 mkdir -p ${BASE_DIR}/netbootxyz/{config,assets/scripts,assets/preseed}
-
 cat <<EOF > ${BASE_DIR}/netbootxyz/docker-compose.yml
 services:
   netbootxyz:
     image: ghcr.io/netbootxyz/netbootxyz
     container_name: netbootxyz
     network_mode: host
-    volumes:
-      - ./config:/config
-      - ./assets:/assets
+    volumes: [ "./config:/config", "./assets:/assets" ]
     restart: unless-stopped
 EOF
 cd ${BASE_DIR}/netbootxyz && docker compose up -d
 
-# ==============================================================================
-# STAP 5: ANSIBLE MAPPENSTRUCTUUR (De 'vDisk' Architectuur)
-# ==============================================================================
-mkdir -p ${REPO_DIR}/{playbooks,group_vars,roles/{common/tasks,office/tasks,devops/tasks,educatie/tasks}}
+# 4. ANSIBLE GITOPS STRUCTUUR (Hier leven je GROEPEN)
+mkdir -p ${REPO_DIR}/playbooks
+mkdir -p ${REPO_DIR}/roles/{common,office,devops,educatie}/tasks
 
-# De Kern: site.yml
-cat <<EOF > ${REPO_DIR}/playbooks/site.yml
-- name: PVS Fat Client Provisioning
-  hosts: localhost
-  become: true
-  roles:
-    - common
-    - "{{ profile | default('office') }}"
-EOF
-
-# Common Role: Drivers, Users, Cleanup
+# --- COMMON ROLE (Printers, Drivers, NL-Taal) ---
 cat <<EOF > ${REPO_DIR}/roles/common/tasks/main.yml
-- name: Hardware Detectie & Drivers
-  include_tasks: drivers.yml
-- name: User Management
-  include_tasks: users.yml
-- name: PVS Cleanup (vDisk Reset)
-  include_tasks: cleanup.yml
-EOF
-
-# Drivers.yml (GPU/CPU Focus)
-cat <<'EOF' > ${REPO_DIR}/roles/common/tasks/drivers.yml
-- name: Microcode Installatie
+- name: Lokalisatie (NL Tijd & Toetsenbord)
+  shell: |
+    timedatectl set-timezone Europe/Amsterdam
+    localectl set-x11-keymap us pc105 intl
+- name: Installeren Drivers & Printer Stack
   package:
-    name: "{{ (ansible_os_family == 'RedHat') | ternary('microcode_ctl', 'intel-microcode') }}"
+    name: [intel-microcode, cups, hplip, sane-utils, avahi-daemon, printer-driver-brlaser, libavcodec-extra]
     state: present
-- name: GPU Check
-  shell: "lspci | grep -iE 'nvidia|vga'"
-  register: gpu_check
-  failed_when: false
+- name: Start Services
+  systemd: { name: "{{ item }}", state: started, enabled: yes }
+  loop: [cups, avahi-daemon]
 EOF
 
-# Cleanup.yml (PVS Reset)
-cat <<'EOF' > ${REPO_DIR}/roles/common/tasks/cleanup.yml
-- name: Wis caches en history
-  file:
-    path: "{{ item }}"
-    state: absent
-  loop: [/tmp/*, /var/tmp/*, /home/ansible/.cache, /home/ansible/.bash_history]
+# --- OFFICE ROLE (De €150 besparing per PC) ---
+cat <<EOF > ${REPO_DIR}/roles/office/tasks/main.yml
+- name: Installeer Chrome & Office
+  package:
+    name: [libreoffice, libreoffice-l10n-nl, vlc, fonts-liberation]
+    state: present
+- name: Google Chrome Repo & Install
+  shell: |
+    wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | apt-key add -
+    echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list
+    apt-get update && apt-get install -y google-chrome-stable
 EOF
 
-# ==============================================================================
-# STAP 6 & 9: PRESEED & PXE MENU (Originele logica hersteld)
-# ==============================================================================
-cat <<EOF > ${BASE_DIR}/netbootxyz/assets/preseed/preseed.cfg
-d-i preseed/late_command string \
-    in-target curl -L -o /tmp/bootstrap.sh http://${SERVER_IP}:8080/scripts/bootstrap.sh; \
-    in-target chmod +x /tmp/bootstrap.sh; \
-    in-target /tmp/bootstrap.sh
-EOF
+# --- DEVOPS & EDUCATIE ROLES ---
+echo "- name: DevOps Tools\n  package: { name: [git, docker.io, code, jq], state: present }" > ${REPO_DIR}/roles/devops/tasks/main.yml
+echo "- name: Educatie Tools\n  package: { name: [gcompris-qt, scratch], state: present }" > ${REPO_DIR}/roles/educatie/tasks/main.yml
 
-cat <<EOF > ${BASE_DIR}/netbootxyz/config/pxe-menu.cfg
-label Debian_Office
-    MENU LABEL Debian 12 - Office
-    KERNEL netboot.xyz.kpxe
-    APPEND profile=office server_ip=${SERVER_IP} url=http://${SERVER_IP}:8080/preseed/preseed.cfg
-EOF
-
-# ==============================================================================
-# STAP 8: BOOTSTRAP AGENT & STORAGE
-# ==============================================================================
+# 5. DE BOOTSTRAP AGENT (Wat de desktop uitvoert bij boot)
 cat <<EOF > ${BASE_DIR}/netbootxyz/assets/scripts/bootstrap.sh
 #!/usr/bin/env bash
-PROFILE=\$(cat /proc/cmdline | grep -oP 'profile=\K\S+' || echo \"office\")
+PROFILE=\$(cat /proc/cmdline | grep -oP 'profile=\K\S+' || echo "office")
 apt-get update && apt-get install -y ansible git
-ansible-pull -U "${GIT_REPO}" -e "profile=\${PROFILE}" playbooks/site.yml
+ansible-pull -U "${GIT_REPO}" -i localhost, -e "profile=\$PROFILE" ${REPO_DIR}/playbooks/site.yml
+reboot
 EOF
 chmod +x ${BASE_DIR}/netbootxyz/assets/scripts/bootstrap.sh
 
-mkdir -p /export/homes
-echo "/export/homes *(rw,sync,no_subtree_check,no_root_squash)" > /etc/exports
-exportfs -a
+# 6. PXE MENU (Keuze voor de klant)
+cat <<EOF > ${BASE_DIR}/netbootxyz/config/pxe-menu.cfg
+label Office_NL
+    KERNEL netboot.xyz.kpxe
+    APPEND profile=office url=http://${SERVER_IP}:8080/preseed/preseed.cfg
+label DevOps_Pro
+    KERNEL netboot.xyz.kpxe
+    APPEND profile=devops url=http://${SERVER_IP}:8080/preseed/preseed.cfg
+EOF
 
-# ==============================================================================
-# STAP 10: EINDE SCHERM (De volledige documentatie)
-# ==============================================================================
-clear
-echo "============================================================"
-echo "        ZERO-TOUCH PVS PROVISIONING READY"
-echo "============================================================"
-echo ""
-echo "NETWERK:"
-echo " - Server IP:    ${SERVER_IP}"
-echo " - DHCP Range:   ${DHCP_RANGE_START} - ${DHCP_RANGE_END}"
-echo ""
-echo "WEB UI & ASSETS:"
-echo " - Netboot UI:   http://${SERVER_IP}:3000"
-echo " - Assets:       http://${SERVER_IP}:8080"
-echo " - Agent Script: http://${SERVER_IP}:8080/scripts/bootstrap.sh"
-echo " - Preseed:      http://${SERVER_IP}:8080/preseed/preseed.cfg"
-echo ""
-echo "ANSIBLE GITOPS REPO:"
-echo " - Pad:          ${REPO_DIR}"
-echo " - Structuur:    Common (Drivers/Cleanup/Users) + Profielen"
-echo ""
-echo "INSTRUCTIES:"
-echo " 1. Initialiseer Git in ${REPO_DIR}"
-echo " 2. Push naar: ${GIT_REPO}"
-echo " 3. Boot je Fat Client en kies je profiel."
-echo "============================================================"
+echo "===> KLAAR! Je PVS-straat staat live op ${SERVER_IP}."
