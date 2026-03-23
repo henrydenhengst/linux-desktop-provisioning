@@ -1,0 +1,23 @@
+---
+- name: "Silent Boot & GRUB Optimization"
+  hosts: localhost
+  connection: local
+  become: yes
+  tasks:
+    - name: "GRUB configureren voor stilte en snelheid"
+      ansible.builtin.lineinfile:
+        path: /etc/default/grub
+        regexp: "{{ item.regexp }}"
+        line: "{{ item.line }}"
+      loop:
+        - { regexp: '^GRUB_TIMEOUT=', line: 'GRUB_TIMEOUT=0' }
+        - { regexp: '^GRUB_RECORDFAIL_TIMEOUT=', line: 'GRUB_RECORDFAIL_TIMEOUT=0' }
+        - { regexp: '^GRUB_CMDLINE_LINUX_DEFAULT=', line: 'GRUB_CMDLINE_LINUX_DEFAULT="quiet loglevel=3 systemd.show_status=auto rd.udev.log_level=3 vt.global_cursor_default=0"' }
+
+    - name: "Update GRUB (Debian/Ubuntu/Kali)"
+      ansible.builtin.command: update-grub
+      when: ansible_os_family == "Debian"
+
+    - name: "Update GRUB (Arch/Fedora/Suse)"
+      ansible.builtin.command: grub-mkconfig -o /boot/grub/grub.cfg
+      when: ansible_os_family != "Debian"
