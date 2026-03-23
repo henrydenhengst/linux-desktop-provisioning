@@ -1,0 +1,38 @@
+---
+- name: "Unified Linux Provisioning Master"
+  hosts: localhost
+  connection: local
+  become: yes
+  vars:
+    font_size: 11
+    font_name: "JetBrainsMono Nerd Font"
+
+  tasks:
+    # 1. Altijd uitvoeren: De Basis (Nord, Fonts, Core tools)
+    - name: "Laden van Core Instellingen"
+      ansible.builtin.include_tasks: tasks/core.yml
+      tags: [always, core]
+
+    # 2. Optioneel: GRUB Silent Boot
+    - name: "Laden van Silent Boot Config"
+      ansible.builtin.include_tasks: tasks/grub_silent.yml
+      tags: boot
+
+    # 3. Optioneel: AI Stack (De Lokale Copilot)
+    - name: "Laden van AI Stack"
+      ansible.builtin.include_tasks: tasks/ai_stack.yml
+      tags: ai
+
+    # 4. Optioneel: Media / YouTuber Stack
+    - name: "Laden van Media Stack"
+      ansible.builtin.include_tasks: tasks/media_stack.yml
+      tags: media
+
+    # 5. Optioneel: Gamer Stack
+    - name: "Laden van Gamer Stack"
+      ansible.builtin.include_tasks: tasks/gamer_stack.yml
+      tags: gamer
+
+  handlers:
+    - name: Update GRUB
+      ansible.builtin.command: "{{ 'update-grub' if ansible_os_family == 'Debian' else 'grub-mkconfig -o /boot/grub/grub.cfg' }}"
