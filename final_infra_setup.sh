@@ -1,4 +1,3 @@
-cat <<'EOF' > final_infra_setup.sh
 #!/usr/bin/env bash
 # PLD Clean Infrastructure Setup
 set -e
@@ -40,7 +39,3 @@ git commit -m "Infra: Schone Docker-basis en mappenstructuur toegevoegd" || echo
 git push origin main
 
 echo "✅ KLAAR! Je server-basis is nu universeel en schoon."
-EOF
-
-chmod +x final_infra_setup.sh
-./final_infra_setup.sh

@@ -1,36 +1,23 @@
 ---
-- name: Installeren van Docker benodigdheden
+- name: Installeren van Docker Engine & Compose
   apt:
-    name: [apt-transport-https, ca-certificates, curl, gnupg, lsb-release, dnsmasq, nfs-kernel-server]
+    name: [docker.io, docker-compose]
     state: present
     update_cache: yes
 
-- name: Docker GPG sleutel toevoegen
-  apt_key:
-    url: https://download.docker.com/linux/debian/gpg
-    state: present
-
-- name: Docker Repository toevoegen
-  apt_repository:
-    repo: "deb [arch=amd64] https://download.docker.com/linux/debian {{ ansible_distribution_release }} stable"
-    state: present
-
-- name: Docker Engine installeren
-  apt:
-    name: [docker-ce, docker-ce-cli, containerd.io, docker-compose-plugin]
-    state: present
-
-- name: Docker service starten
+- name: Docker service inschakelen
   service:
     name: docker
     state: started
     enabled: yes
 
-- name: Netboot mappenstructuur aanmaken
+- name: Container mappen aanmaken (zoals in .gitignore)
   file:
     path: "{{ item }}"
     state: directory
     mode: '0755'
   loop:
-    - /var/lib/tftpboot
-    - /var/www/html/debian
+    - /opt/pld/caddy
+    - /opt/pld/homeassistant
+    - /opt/pld/vaultwarden
+    - /opt/pld/mosquitto
