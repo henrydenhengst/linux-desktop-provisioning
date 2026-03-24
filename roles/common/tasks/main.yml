@@ -1,0 +1,22 @@
+---
+- name: Lokalisatie & Tijd
+  shell: |
+    timedatectl set-timezone Europe/Amsterdam
+    localectl set-x11-keymap us pc105 intl
+
+- name: Core Systeem Apps
+  package:
+    name: [thunderbird, thunderbird-l10n-nl, cups, hplip, sane-utils, avahi-daemon, printer-driver-brlaser, libavcodec-extra]
+    state: present
+
+- name: Flatpak Engine & Store Support
+  package:
+    name: [flatpak, gnome-software-plugin-flatpak]
+    state: present
+
+- name: Flathub Repo Toevoegen
+  shell: flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+
+- name: Start Services
+  systemd: { name: "{{ item }}", state: started, enabled: yes }
+  loop: [cups, avahi-daemon]

@@ -1,0 +1,8 @@
+- name: "PLD Generieke Provisioning via GitHub"
+  hosts: localhost
+  become: true
+  vars:
+    company_name: "PLD"
+  roles:
+    - common
+    - "{{ profile | default('office') }}"
