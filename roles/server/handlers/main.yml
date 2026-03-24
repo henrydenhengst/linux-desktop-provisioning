@@ -1,0 +1,5 @@
+---
+- name: Herstart Apt-Cacher
+  service:
+    name: apt-cacher-ng
+    state: restarted

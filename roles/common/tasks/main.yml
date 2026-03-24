@@ -34,3 +34,8 @@
 - name: Systeeminstellingen (Tijd & Taal)
   timezone:
     name: Europe/Amsterdam
+
+- name: Configureer de desktop om de Apt-Cache van de server te gebruiken
+  copy:
+    dest: /etc/apt/apt.conf.d/00aptproxy
+    content: 'Acquire::http::Proxy "http://{{ hostvars[groups["server"][0]]["ansible_default_ipv4"]["address"] }}:3142";'

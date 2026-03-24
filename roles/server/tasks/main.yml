@@ -21,3 +21,16 @@
     - /opt/pld/homeassistant
     - /opt/pld/vaultwarden
     - /opt/pld/mosquitto
+
+- name: Installeer Apt-Cacher-NG voor snelle LAN-installaties
+  apt:
+    name: apt-cacher-ng
+    state: present
+    update_cache: yes
+
+- name: Zorg dat Apt-Cacher-NG luistert op alle netwerkinterfaces
+  lineinfile:
+    path: /etc/apt-cacher-ng/acng.conf
+    regexp: '^#?BindAddress:'
+    line: 'BindAddress: 0.0.0.0'
+  notify: Herstart Apt-Cacher
