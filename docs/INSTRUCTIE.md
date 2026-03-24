@@ -1,6 +1,6 @@
 # WERKINSTRUCTIE: PLD DEPLOYMENT STRAAT
 
-Deze instructie beschrijft hoe je de PLD-infrastructuur opzet en beheert om **6 desktops per uur** te kunnen installeren met behulp van **Ansible** en **Apt-Cacher-NG**.
+Deze instructie beschrijft hoe je de PLD-infrastructuur opzet en beheert om Linux distro desktops te kunnen installeren met behulp van **Ansible** en **Apt-Cacher-NG**.
 
 ---
 
@@ -45,7 +45,7 @@ systemctl status apt-cacher-ng
 De hardware-opstelling voor maximale snelheid.
 
 ### Netwerk
-- Sluit de server en de 6 desktops aan op de **DGS-3100 switch**.
+- Sluit de server en de desktops aan op de switch.
 
 ### Bootstrapping
 - Start de desktops op (via Netboot/PXE of een minimale USB-installatie).
@@ -73,7 +73,7 @@ Voer op de desktop het gewenste commando uit. Standaard wordt het **Office**-pro
 
 ### Het proces
 - De eerste desktop downloadt pakketten van internet naar de server-cache.
-- De volgende 5 desktops halen dezelfde pakketten direct van de server op **1Gbps snelheid**.
+- De volgende desktops halen dezelfde pakketten direct van de server.
 
 ---
 
@@ -126,4 +126,4 @@ cd ~/git/pld && git pull && sudo ansible-playbook playbooks/server.yml
 roles/office/tasks/main.yml
 ```
 
-- Monitor de voortgang van de 6 desktops via de server-terminal.
+- Monitor de voortgang van de desktops via de server-terminal.
