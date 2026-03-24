@@ -19,7 +19,7 @@ sudo apt install -y git ansible curl
 
 # 2. Project ophalen van GitHub
 echo -e "${BLUE}📥 2. Project ophalen van GitHub...${NC}"
-PROJECT_DIR="$HOME/pld-server"
+PROJECT_DIR="$HOME/git/pld"
 
 if [ -d "$PROJECT_DIR" ]; then
     echo "Directory bestaat al, ophalen nieuwste wijzigingen..."
