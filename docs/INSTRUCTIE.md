@@ -55,6 +55,22 @@ De hardware-opstelling voor maximale snelheid.
 curl -s https://raw.githubusercontent.com/henrydenhengst/pld/main/bootstrap.sh | bash
 ```
 
+### 🚀 Profiel Keuze
+
+Voer op de desktop het gewenste commando uit. Standaard wordt het **Office**-profiel geïnstalleerd als je geen argument meegeeft.
+
+| Profiel | Commando |
+| :--- | :--- |
+| **1. Office (Default)** | `curl -s https://raw.githubusercontent.com/henrydenhengst/pld/main/bootstrap.sh \| bash` |
+| **2. Privacy Focused** | `curl -s https://raw.githubusercontent.com/henrydenhengst/pld/main/bootstrap.sh \| bash -s privacy` |
+| **3. Development** | `curl -s https://raw.githubusercontent.com/henrydenhengst/pld/main/bootstrap.sh \| bash -s dev` |
+| **4. Gaming Setup** | `curl -s https://raw.githubusercontent.com/henrydenhengst/pld/main/bootstrap.sh \| bash -s gaming` |
+| **5. Media Station** | `curl -s https://raw.githubusercontent.com/henrydenhengst/pld/main/bootstrap.sh \| bash -s media` |
+| **6. Clean (Minimaal)** | `curl -s https://raw.githubusercontent.com/henrydenhengst/pld/main/bootstrap.sh \| bash -s clean` |
+| **7. Server Config** | `curl -s https://raw.githubusercontent.com/henrydenhengst/pld/main/bootstrap.sh \| bash -s server` |
+
+
+
 ### Het proces
 - De eerste desktop downloadt pakketten van internet naar de server-cache.
 - De volgende 5 desktops halen dezelfde pakketten direct van de server op **1Gbps snelheid**.
