@@ -1,4 +1,3 @@
-cat <<'EOF' > update_server_role.sh
 #!/usr/bin/env bash
 # PLD Server Provisioning Update
 set -e
@@ -64,7 +63,3 @@ git commit -m "Server-infra: Docker, Netboot en Dnsmasq support toegevoegd" || e
 git push origin main
 
 echo "✅ KLAAR! Je server-recept staat live."
-EOF
-
-chmod +x update_server_role.sh
-./update_server_role.sh
