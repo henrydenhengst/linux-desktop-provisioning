@@ -45,7 +45,8 @@ systemctl status apt-cacher-ng
 De hardware-opstelling voor maximale snelheid.
 
 ### Netwerk
-- Sluit de server en de desktops aan op de switch.
+- Sluit de server en de desktops aan op de switch. Voorkom een [DHCP-oorlog](docs/dhcp-oorlog.md)!
+
 
 ### Bootstrapping
 - Start de desktops op (via Netboot/PXE of een minimale USB-installatie).
