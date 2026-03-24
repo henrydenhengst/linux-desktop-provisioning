@@ -58,4 +58,9 @@ Omdat de server headless is, gebruik je de volgende bronnen voor overzicht:
 
 ---
 
+## 📖 Instructies
+Voor een gedetailleerde stappenplan over het configureren en uitrollen van de desktops, zie de [Installatie Instructies](docs/INSTRUCTIE.md).
+
+---
+
 > **PLD-Filosofie**: "Build once, deploy everywhere." Lokale wijzigingen op de Fat Client zijn tijdelijk; de waarheid ligt altijd in deze Git-repository.
