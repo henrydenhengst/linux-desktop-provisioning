@@ -38,7 +38,7 @@ De repository is ingericht volgens de Ansible Best Practices voor maximale schaa
 
 ## 🚀 Dagelijks Beheer (Zonder Nadenken)
 
-Het beheer is volledig **GitOps** gedreven. Wijzigingen aan de vloot worden doorgevoerd via tekstaanpassingen in deze repo.
+Het beheer is volledig **GitOps** gedreven. Wijzigingen aan de vloot worden doorgevoerd via configuratie-wijzigingen in deze repo.
 
 ### Gebruikers of Software Toevoegen
 Pas de lijst in `group_vars/all.yml` aan voor nieuwe gebruikers, of voeg pakketten toe aan een specifieke rol. Zodra de wijzigingen zijn gepusht naar de Git-server, zullen de Fat Clients deze automatisch ophalen.

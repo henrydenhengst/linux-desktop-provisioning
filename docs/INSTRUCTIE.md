@@ -21,21 +21,21 @@ sudo apt update && sudo apt install -y git ansible
 3. Haal je project binnen van GitHub:
 
 ```bash
-git clone https://github.com/henrydenhengst/pld.git ~/git/pld
+git clone https://github.com/henrydenhengst/pld.git ~/pld
 ```
 
 
 4. Voer het installatiescript uit:
 
 ```bash
-cd ~/git/pld  
+cd ~/pld  
 sudo ./install-pld-server.sh
 ```
 
 5. Controleer of de Apt-Cacher actief is:
 
 ```bash
-systemctl status apt-cacher-ng
+systemctl status apt-cacher-ng nginx
 ```
 
 ---
@@ -53,7 +53,7 @@ De hardware-opstelling voor maximale snelheid.
 - Zodra je een terminal hebt op de desktop, voer je het volgende commando uit:
 
 ```bash
-curl -s https://raw.githubusercontent.com/henrydenhengst/pld/main/bootstrap.sh | bash
+curl -s http://192.168.100.1/bootstrap.sh | bash
 ```
 
 ### 🚀 Profiel Keuze
@@ -62,13 +62,13 @@ Voer op de desktop het gewenste commando uit. Standaard wordt het **Office**-pro
 
 | Profiel | Commando |
 | :--- | :--- |
-| **1. Office (Default)** | `curl -s https://raw.githubusercontent.com/henrydenhengst/pld/main/bootstrap.sh \| bash` |
-| **2. Privacy Focused** | `curl -s https://raw.githubusercontent.com/henrydenhengst/pld/main/bootstrap.sh \| bash -s privacy` |
-| **3. Development** | `curl -s https://raw.githubusercontent.com/henrydenhengst/pld/main/bootstrap.sh \| bash -s dev` |
-| **4. Gaming Setup** | `curl -s https://raw.githubusercontent.com/henrydenhengst/pld/main/bootstrap.sh \| bash -s gaming` |
-| **5. Media Station** | `curl -s https://raw.githubusercontent.com/henrydenhengst/pld/main/bootstrap.sh \| bash -s media` |
-| **6. Clean (Minimaal)** | `curl -s https://raw.githubusercontent.com/henrydenhengst/pld/main/bootstrap.sh \| bash -s clean` |
-| **7. Server Config** | `curl -s https://raw.githubusercontent.com/henrydenhengst/pld/main/bootstrap.sh \| bash -s server` |
+| **1. Office (Default)** | `curl -s http://192.168.100.1/bootstrap.sh \| bash` |
+| **2. Privacy Focused** | `curl -s http://192.168.100.1/bootstrap.sh \| bash -s privacy` |
+| **3. Development** | `curl -s http://192.168.100.1/bootstrap.sh \| bash -s dev` |
+| **4. Gaming Setup** | `curl -s http://192.168.100.1/bootstrap.sh \| bash -s gaming` |
+| **5. Media Station** | `curl -s http://192.168.100.1/bootstrap.sh \| bash -s media` |
+| **6. Clean (Minimaal)** | `curl -s http://192.168.100.1/bootstrap.sh \| bash -s clean` |
+| **7. Server Config** | `curl -s http://192.168.100.1/bootstrap.sh \| bash -s server` |
 
 
 
@@ -98,14 +98,14 @@ Je beheert de hele **"fabriek"** vanaf je laptop via Git.
 
 ```bash
 git add .
-git commit
+git commit -m "Update configuratie"
 git push
 ```
 
 ### Server bijwerken
 
 ```bash
-cd ~/git/pld && git pull && sudo ansible-playbook playbooks/server.yml
+cd ~/pld && git pull && sudo ansible-playbook playbooks/server.yml
 ```
 
 ### Opschonen

@@ -3,6 +3,7 @@
   hosts: all
   become: yes
   roles:
-    - network       # Hardware check & IP 192.168.100.1
-    - dhcp          # Deelt adressen uit in 192.168.100.x
-    - apt_proxy     # Cache voor de pakketten
+    - network       # Hardware check + IP 192.168.100.1 + NAT Routing
+    - dhcp          # Deelt IP-adressen uit aan de desktops
+    - webserver     # Serveert bootstrap.sh via http://192.168.100.1
+    - apt_proxy     # Cache voor razendsnelle installaties

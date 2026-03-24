@@ -1,0 +1,25 @@
+---
+- name: Installeer een lichtgewicht webserver (Nginx)
+  ansible.builtin.apt:
+    name: nginx
+    state: present
+
+- name: Kopieer het bootstrap script naar de web-root
+  ansible.builtin.copy:
+    # Let op het pad: dit gaat vanuit roles/webserver/tasks/ 3 mappen terug naar /scripts
+    src: ../../../scripts/bootstrap.sh
+    dest: /var/www/html/bootstrap.sh
+    mode: '0755'
+    owner: www-data
+    group: www-data
+
+- name: Verwijder de standaard Nginx index pagina (Optioneel)
+  ansible.builtin.file:
+    path: /var/www/html/index.nginx-debian.html
+    state: absent
+
+- name: Zorg dat Nginx service draait en start bij boot
+  ansible.builtin.service:
+    name: nginx
+    state: started
+    enabled: yes
