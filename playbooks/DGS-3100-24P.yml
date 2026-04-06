@@ -1,17 +1,18 @@
-- name: DGS-3100-24P Full Provision with Firmware
+- name: DGS-3100-24P Full Provision with Firmware and Network
   hosts: localhost
   gather_facts: no
 
   vars:
-    switch_ip: 10.90.90.90
+    switch_ip: 10.90.90.90          # default IP van de switch na reset
     username: admin
     passwords:
       - ""
       - "admin"
-    tftp_server: 10.90.90.10        # IP van TFTP server
+    tftp_server: 192.168.100.10     # jouw TFTP-server IP
     firmware_url: "https://support.dlink.com/resource/PRODUCTS/DGS-3100-24/REVA/DGS-3100-24_FIRMWARE_3.60.28.ZIP"
-    firmware_file: "dgs_31xx_gen-36028.ros"   # uitgepakt uit ZIP, CLI-bestand
+    firmware_file: "dgs_31xx_gen-36028.ros"  # uitgepakt bestand
     config_commands: |
+      # VLANs
       create vlan CLIENTS tag 10
       create vlan SERVERS tag 20
       create vlan IPMI tag 30
@@ -26,6 +27,11 @@
 
       config vlan default delete 1-24
       config ports 11-20 state disable
+
+      # Netwerk instellingen
+      config ipif system vlan MGMT 192.168.100.254 255.255.255.0
+      config ipif default-gateway 192.168.100.1
+      config ipif dns 9.9.9.9 1.1.1.1 8.8.8.8
 
   tasks:
 
@@ -98,8 +104,8 @@
       port: 23
       timeout: 180
 
-  # 6️⃣ Post-firmware VLAN + poort config
-  - name: Apply VLAN and port configuration
+  # 6️⃣ Post-firmware VLAN + poort + netwerk config
+  - name: Apply VLAN, ports and network configuration
     ansible.builtin.expect:
       command: telnet {{ switch_ip }}
       timeout: 60
@@ -111,7 +117,7 @@
         "\\(config\\)#": "{{ config_commands }}\nexit\n"
         "#": "save\n"
 
-  # 7️⃣ Telnet uitzetten voor security
+  # 7️⃣ Telnet uitschakelen
   - name: Disable telnet after provisioning
     ansible.builtin.expect:
       command: telnet {{ switch_ip }}
@@ -123,10 +129,10 @@
         "#": "disable telnet\n"
         "#": "save\n"
 
-  # 8️⃣ Optioneel: controleer HTTPS / SSH intern
+  # 8️⃣ Optioneel: controleer HTTPS intern (intern netwerk)
   - name: Verify HTTPS enabled (optional)
     ansible.builtin.wait_for:
-      host: "{{ switch_ip }}"
+      host: 192.168.100.254
       port: 443
       timeout: 30
       state: started
