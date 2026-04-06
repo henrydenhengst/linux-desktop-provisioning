@@ -1,16 +1,13 @@
-- name: DGS-3100-24P Full Provision with Firmware and Network
+- name: DGS-3100-24P Post-Firmware Provisioning
   hosts: localhost
   gather_facts: no
 
   vars:
-    switch_ip: 10.90.90.90          # default IP van de switch na reset
+    switch_ip: 10.90.90.90          # IP na firmware upgrade of console setup
     username: admin
     passwords:
       - ""
       - "admin"
-    tftp_server: 192.168.100.10     # jouw TFTP-server IP
-    firmware_url: "https://support.dlink.com/resource/PRODUCTS/DGS-3100-24/REVA/DGS-3100-24_FIRMWARE_3.60.28.ZIP"
-    firmware_file: "dgs_31xx_gen-36028.ros"  # uitgepakt bestand
     config_commands: |
       # VLANs
       create vlan CLIENTS tag 10
@@ -35,27 +32,14 @@
 
   tasks:
 
-  # 1️⃣ Download firmware naar TFTP server
-  - name: Download firmware via get_url
-    ansible.builtin.get_url:
-      url: "{{ firmware_url }}"
-      dest: "/tmp/{{ firmware_file }}.zip"
-      mode: '0644'
-
-  - name: Unzip firmware for TFTP
-    ansible.builtin.unarchive:
-      src: "/tmp/{{ firmware_file }}.zip"
-      dest: "/tmp"
-      remote_src: yes
-
-  # 2️⃣ Wacht tot switch bereikbaar is via Telnet
+  # 1️⃣ Wacht tot switch bereikbaar is via Telnet
   - name: Wait for switch telnet
     ansible.builtin.wait_for:
       host: "{{ switch_ip }}"
       port: 23
       timeout: 60
 
-  # 3️⃣ Login via Telnet (fallback passwords)
+  # 2️⃣ Login via Telnet (fallback passwords)
   - name: Determine working password
     block:
       - name: Attempt login
@@ -84,27 +68,7 @@
           msg: "Geen werkende login gevonden"
         when: working_password is not defined
 
-  # 4️⃣ Firmware upload via CLI
-  - name: Upload firmware via Telnet
-    ansible.builtin.expect:
-      command: telnet {{ switch_ip }}
-      timeout: 120
-      responses:
-        "UserName:": "{{ username }}\n"
-        "PassWord:": "{{ working_password }}\n"
-        ">": "enable\n"
-        "#": "download firmware {{ tftp_server }} {{ firmware_file }}\n"
-        "#": "reboot\n"
-        "Are you sure you want to continue? (Y/N)": "Y\n"
-
-  # 5️⃣ Wacht tot switch terug is
-  - name: Wait for switch reboot
-    ansible.builtin.wait_for:
-      host: "{{ switch_ip }}"
-      port: 23
-      timeout: 180
-
-  # 6️⃣ Post-firmware VLAN + poort + netwerk config
+  # 3️⃣ VLAN + poorten + netwerk configuratie
   - name: Apply VLAN, ports and network configuration
     ansible.builtin.expect:
       command: telnet {{ switch_ip }}
@@ -117,7 +81,7 @@
         "\\(config\\)#": "{{ config_commands }}\nexit\n"
         "#": "save\n"
 
-  # 7️⃣ Telnet uitschakelen
+  # 4️⃣ Telnet uitschakelen
   - name: Disable telnet after provisioning
     ansible.builtin.expect:
       command: telnet {{ switch_ip }}
@@ -128,11 +92,3 @@
         ">": "enable\n"
         "#": "disable telnet\n"
         "#": "save\n"
-
-  # 8️⃣ Optioneel: controleer HTTPS intern (intern netwerk)
-  - name: Verify HTTPS enabled (optional)
-    ansible.builtin.wait_for:
-      host: 192.168.100.254
-      port: 443
-      timeout: 30
-      state: started
