@@ -1,4 +1,4 @@
-- name: Full Provision DGS-3100-24P with firmware
+- name: DGS-3100-24P Full Provision with Firmware
   hosts: localhost
   gather_facts: no
 
@@ -8,9 +8,9 @@
     passwords:
       - ""
       - "admin"
-    tftp_server: 10.90.90.10  # IP van jouw TFTP server
+    tftp_server: 10.90.90.10        # IP van TFTP server
     firmware_url: "https://support.dlink.com/resource/PRODUCTS/DGS-3100-24/REVA/DGS-3100-24_FIRMWARE_3.60.28.ZIP"
-    firmware_file: "DGS-3100-24_FIRMWARE_3.60.28.bin"  # unzip zelf
+    firmware_file: "dgs_31xx_gen-36028.ros"   # uitgepakt uit ZIP, CLI-bestand
     config_commands: |
       create vlan CLIENTS tag 10
       create vlan SERVERS tag 20
@@ -27,30 +27,32 @@
       config vlan default delete 1-24
       config ports 11-20 state disable
 
-      ip http secure-server
-      enable ssh
-      config ssh server enable
-
   tasks:
 
-  # 1. Download firmware
-  - name: Download firmware with curl
+  # 1️⃣ Download firmware naar TFTP server
+  - name: Download firmware via get_url
     ansible.builtin.get_url:
       url: "{{ firmware_url }}"
-      dest: "/tmp/{{ firmware_file }}"
+      dest: "/tmp/{{ firmware_file }}.zip"
       mode: '0644'
 
-  # 2. Wait until switch reachable
-  - name: Wait for telnet
+  - name: Unzip firmware for TFTP
+    ansible.builtin.unarchive:
+      src: "/tmp/{{ firmware_file }}.zip"
+      dest: "/tmp"
+      remote_src: yes
+
+  # 2️⃣ Wacht tot switch bereikbaar is via Telnet
+  - name: Wait for switch telnet
     ansible.builtin.wait_for:
       host: "{{ switch_ip }}"
       port: 23
       timeout: 60
 
-  # 3. Login via telnet (fallback passwords)
+  # 3️⃣ Login via Telnet (fallback passwords)
   - name: Determine working password
     block:
-      - name: Attempt login with passwords
+      - name: Attempt login
         ansible.builtin.expect:
           command: telnet {{ switch_ip }}
           timeout: 20
@@ -76,31 +78,31 @@
           msg: "Geen werkende login gevonden"
         when: working_password is not defined
 
-  # 4. Firmware upload via TFTP
-  - name: Upload firmware via telnet
+  # 4️⃣ Firmware upload via CLI
+  - name: Upload firmware via Telnet
     ansible.builtin.expect:
       command: telnet {{ switch_ip }}
-      timeout: 60
+      timeout: 120
       responses:
         "UserName:": "{{ username }}\n"
         "PassWord:": "{{ working_password }}\n"
         ">": "enable\n"
-        "#": "copy tftp {{ tftp_server }} {{ firmware_file }} flash\n"
-        "#": "reload\n"
-        "#": "yes\n"
+        "#": "download firmware {{ tftp_server }} {{ firmware_file }}\n"
+        "#": "reboot\n"
+        "Are you sure you want to continue? (Y/N)": "Y\n"
 
-  # 5. Wait for switch reboot
-  - name: Wait for switch to come back
+  # 5️⃣ Wacht tot switch terug is
+  - name: Wait for switch reboot
     ansible.builtin.wait_for:
       host: "{{ switch_ip }}"
       port: 23
       timeout: 180
 
-  # 6. Apply post-firmware configuration
-  - name: Apply VLAN and security config
+  # 6️⃣ Post-firmware VLAN + poort config
+  - name: Apply VLAN and port configuration
     ansible.builtin.expect:
       command: telnet {{ switch_ip }}
-      timeout: 30
+      timeout: 60
       responses:
         "UserName:": "{{ username }}\n"
         "PassWord:": "{{ working_password }}\n"
@@ -109,7 +111,7 @@
         "\\(config\\)#": "{{ config_commands }}\nexit\n"
         "#": "save\n"
 
-  # 7. Disable telnet for security
+  # 7️⃣ Telnet uitzetten voor security
   - name: Disable telnet after provisioning
     ansible.builtin.expect:
       command: telnet {{ switch_ip }}
@@ -121,9 +123,10 @@
         "#": "disable telnet\n"
         "#": "save\n"
 
-  # 8. Verify HTTPS is active
-  - name: Verify HTTPS enabled
+  # 8️⃣ Optioneel: controleer HTTPS / SSH intern
+  - name: Verify HTTPS enabled (optional)
     ansible.builtin.wait_for:
       host: "{{ switch_ip }}"
       port: 443
       timeout: 30
+      state: started
