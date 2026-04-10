@@ -2,13 +2,15 @@
 - name: FULL PXE STACK (netboot.xyz + iVentoy + DHCP + TFTP)
   hosts: pxe_server
   become: true
+  gather_facts: true
 
   vars:
-    interface: eth0
+    # AUTO interface (FIX: geen eth0 meer)
+    interface: "{{ ansible_default_ipv4.interface }}"
 
     dhcp_range_start: 192.168.1.100
     dhcp_range_end: 192.168.1.200
-    router: 192.168.1.1
+    router: "{{ ansible_default_ipv4.gateway }}"
     dns: 1.1.1.1
 
     tftp_root: /srv/tftp
@@ -61,7 +63,7 @@
   # -------------------------
   # DHCP CONFIG
   # -------------------------
-  - name: Configure dnsmasq
+  - name: Configure dnsmasq (PXE DHCP + TFTP)
     copy:
       dest: /etc/dnsmasq.conf
       content: |
@@ -84,15 +86,11 @@
       enabled: true
 
   # -------------------------
-  # GET SERVER IP
+  # SERVER IP DETECTION
   # -------------------------
-  - name: Get server IP
-    command: hostname -I
-    register: ip_out
-
   - name: Set server IP fact
     set_fact:
-      server_ip: "{{ ip_out.stdout.split()[0] }}"
+      server_ip: "{{ ansible_default_ipv4.address }}"
 
   # -------------------------
   # IVPENTOY INSTALL
@@ -152,13 +150,16 @@
   - name: Reload systemd
     command: systemctl daemon-reload
 
-  - name: Start iVentoy (with retry check)
+  - name: Start iVentoy service
     systemd:
       name: iventoy
       state: started
       enabled: true
 
-  - name: Wait for iVentoy web UI
+  # -------------------------
+  # HEALTH CHECK (FIXED)
+  # -------------------------
+  - name: Wait for iVentoy web UI (health check)
     uri:
       url: http://localhost:26000
       status_code: 200
