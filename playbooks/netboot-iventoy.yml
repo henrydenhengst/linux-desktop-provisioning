@@ -1,107 +1,188 @@
 ---
-- name: Install and configure iVentoy PXE server
+- name: FULL PXE STACK (netboot.xyz + iVentoy + DHCP + TFTP)
   hosts: pxe_server
   become: true
 
   vars:
-    iventoy_install_dir: /opt/iventoy
+    interface: eth0
+
+    dhcp_range_start: 192.168.1.100
+    dhcp_range_end: 192.168.1.200
+    router: 192.168.1.1
+    dns: 1.1.1.1
+
+    tftp_root: /srv/tftp
+    web_root: /var/www/html
+
+    iventoy_dir: /opt/iventoy
     iventoy_iso_dir: /opt/iventoy/iso
+
     iventoy_url: https://github.com/ventoy/PXE/releases/latest/download/iventoy-linux-free.tar.gz
-    ipxe_web_root: /var/www/html
-    iventoy_ipxe_file: /var/www/html/iventoy.ipxe
+    netboot_url: https://boot.netboot.xyz/ipxe/netboot.xyz.kpxe
 
   tasks:
 
-    - name: Install dependencies
-      apt:
-        name:
-          - wget
-          - tar
-          - apache2
-        state: present
-        update_cache: yes
+  # -------------------------
+  # BASE PACKAGES
+  # -------------------------
+  - name: Install base packages (with retries)
+    apt:
+      name:
+        - dnsmasq
+        - apache2
+        - wget
+        - tar
+        - curl
+      state: present
+      update_cache: yes
+    register: apt_install
+    retries: 5
+    delay: 5
+    until: apt_install is succeeded
 
-    - name: Ensure install directory exists
-      file:
-        path: "{{ iventoy_install_dir }}"
-        state: directory
-        mode: '0755'
+  # -------------------------
+  # TFTP SETUP
+  # -------------------------
+  - name: Create TFTP root
+    file:
+      path: "{{ tftp_root }}"
+      state: directory
+      mode: '0755'
 
-    - name: Download iVentoy
-      get_url:
-        url: "{{ iventoy_url }}"
-        dest: /tmp/iventoy.tar.gz
-        mode: '0644'
+  - name: Download netboot.xyz (with retries)
+    get_url:
+      url: "{{ netboot_url }}"
+      dest: "{{ tftp_root }}/netboot.xyz.kpxe"
+    register: netboot_download
+    retries: 5
+    delay: 3
+    until: netboot_download is succeeded
 
-    - name: Extract iVentoy
-      unarchive:
-        src: /tmp/iventoy.tar.gz
-        dest: /tmp/
-        remote_src: yes
+  # -------------------------
+  # DHCP CONFIG
+  # -------------------------
+  - name: Configure dnsmasq
+    copy:
+      dest: /etc/dnsmasq.conf
+      content: |
+        interface={{ interface }}
+        bind-interfaces
 
-    - name: Copy iVentoy files
-      copy:
-        src: "{{ item }}"
-        dest: "{{ iventoy_install_dir }}/"
-        remote_src: yes
-      with_fileglob:
-        - "/tmp/iventoy-*/*"
+        dhcp-range={{ dhcp_range_start }},{{ dhcp_range_end }},12h
+        dhcp-option=3,{{ router }}
+        dhcp-option=6,{{ dns }}
 
-    - name: Ensure ISO directory exists
-      file:
-        path: "{{ iventoy_iso_dir }}"
-        state: directory
-        mode: '0755'
+        enable-tftp
+        tftp-root={{ tftp_root }}
 
-    - name: Get server IP
-      command: hostname -I
-      register: server_ip_raw
+        dhcp-boot=netboot.xyz.kpxe
 
-    - name: Set server IP fact
-      set_fact:
-        server_ip: "{{ server_ip_raw.stdout.split()[0] }}"
+  - name: Restart dnsmasq
+    systemd:
+      name: dnsmasq
+      state: restarted
+      enabled: true
 
-    - name: Create iPXE chain script
-      copy:
-        dest: "{{ iventoy_ipxe_file }}"
-        mode: '0644'
-        content: |
-          #!ipxe
-          dhcp
-          chain http://{{ server_ip }}:26000/iventoy.ipxe
+  # -------------------------
+  # GET SERVER IP
+  # -------------------------
+  - name: Get server IP
+    command: hostname -I
+    register: ip_out
 
-    - name: Create systemd service for iVentoy
-      copy:
-        dest: /etc/systemd/system/iventoy.service
-        mode: '0644'
-        content: |
-          [Unit]
-          Description=iVentoy PXE Server
-          After=network.target
+  - name: Set server IP fact
+    set_fact:
+      server_ip: "{{ ip_out.stdout.split()[0] }}"
 
-          [Service]
-          Type=simple
-          ExecStart={{ iventoy_install_dir }}/iventoy.sh start
-          ExecStop={{ iventoy_install_dir }}/iventoy.sh stop
-          Restart=always
+  # -------------------------
+  # IVPENTOY INSTALL
+  # -------------------------
+  - name: Create iVentoy directory
+    file:
+      path: "{{ iventoy_dir }}"
+      state: directory
 
-          [Install]
-          WantedBy=multi-user.target
+  - name: Download iVentoy (with retries)
+    get_url:
+      url: "{{ iventoy_url }}"
+      dest: /tmp/iventoy.tar.gz
+    register: iventoy_dl
+    retries: 5
+    delay: 5
+    until: iventoy_dl is succeeded
 
-    - name: Reload systemd
-      command: systemctl daemon-reexec
+  - name: Extract iVentoy
+    unarchive:
+      src: /tmp/iventoy.tar.gz
+      dest: /tmp/
+      remote_src: yes
 
-    - name: Reload systemd daemon
-      command: systemctl daemon-reload
+  - name: Copy iVentoy files
+    copy:
+      src: "{{ item }}"
+      dest: "{{ iventoy_dir }}/"
+      remote_src: yes
+    with_fileglob:
+      - "/tmp/iventoy-*/*"
 
-    - name: Enable and start iVentoy
-      systemd:
-        name: iventoy
-        enabled: yes
-        state: started
+  - name: Create ISO directory
+    file:
+      path: "{{ iventoy_iso_dir }}"
+      state: directory
 
-    - name: Ensure Apache is running
-      systemd:
-        name: apache2
-        enabled: yes
-        state: started
+  # -------------------------
+  # IVPENTOY SERVICE
+  # -------------------------
+  - name: Create systemd service for iVentoy
+    copy:
+      dest: /etc/systemd/system/iventoy.service
+      content: |
+        [Unit]
+        Description=iVentoy PXE Server
+        After=network.target
+
+        [Service]
+        ExecStart={{ iventoy_dir }}/iventoy.sh start
+        ExecStop={{ iventoy_dir }}/iventoy.sh stop
+        Restart=always
+
+        [Install]
+        WantedBy=multi-user.target
+
+  - name: Reload systemd
+    command: systemctl daemon-reload
+
+  - name: Start iVentoy (with retry check)
+    systemd:
+      name: iventoy
+      state: started
+      enabled: true
+
+  - name: Wait for iVentoy web UI
+    uri:
+      url: http://localhost:26000
+      status_code: 200
+    register: iventoy_check
+    retries: 10
+    delay: 3
+    until: iventoy_check.status == 200
+
+  # -------------------------
+  # IPXE CHAIN SCRIPT
+  # -------------------------
+  - name: Create iPXE chain script
+    copy:
+      dest: "{{ web_root }}/iventoy.ipxe"
+      content: |
+        #!ipxe
+        dhcp
+        chain http://{{ server_ip }}:26000/iventoy.ipxe
+
+  # -------------------------
+  # APACHE
+  # -------------------------
+  - name: Ensure Apache running
+    systemd:
+      name: apache2
+      state: started
+      enabled: true
