@@ -1,5 +1,5 @@
 ---
-- name: FULL PXE STACK + UNBOUND DNS
+- name: CLEAN PXE STACK (NGINX + UNBOUND + IVPENTOY)
   hosts: pxe_server
   become: true
   gather_facts: true
@@ -11,11 +11,10 @@
 
     dhcp_range_start: 192.168.1.100
     dhcp_range_end: 192.168.1.200
+    lan_cidr: 192.168.1.0/24
 
     tftp_root: /srv/tftp
     web_root: /var/www/html
-
-    dns_lan_cidr: 192.168.1.0/24
 
     iventoy_dir: /opt/iventoy
     iventoy_url: https://github.com/ventoy/PXE/releases/latest/download/iventoy-linux-free.tar.gz
@@ -24,14 +23,14 @@
   tasks:
 
   # -------------------------
-  # PACKAGES
+  # BASE PACKAGES
   # -------------------------
   - name: Install required packages
     apt:
       name:
         - dnsmasq
         - unbound
-        - apache2
+        - nginx
         - wget
         - curl
         - tar
@@ -41,9 +40,9 @@
     delay: 5
 
   # -------------------------
-  # DISABLE CONFLICTING DNS
+  # STOP CONFLICTING DNS
   # -------------------------
-  - name: Stop systemd-resolved (avoid DNS conflict)
+  - name: Disable systemd-resolved
     systemd:
       name: systemd-resolved
       state: stopped
@@ -51,9 +50,9 @@
     ignore_errors: yes
 
   # -------------------------
-  # UNBOUND CONFIG
+  # UNBOUND DNS (PRIMARY)
   # -------------------------
-  - name: Configure Unbound (Primary DNS)
+  - name: Configure Unbound DNS
     copy:
       dest: /etc/unbound/unbound.conf.d/pxe.conf
       content: |
@@ -61,7 +60,7 @@
           interface: 0.0.0.0
           port: 53
 
-          access-control: {{ dns_lan_cidr }} allow
+          access-control: {{ lan_cidr }} allow
 
           cache-size: 128m
           prefetch: yes
@@ -81,9 +80,9 @@
       enabled: true
 
   # -------------------------
-  # DHCP / PXE (dnsmasq)
+  # DNSMASQ (DHCP + PXE)
   # -------------------------
-  - name: Configure dnsmasq for PXE
+  - name: Configure dnsmasq
     copy:
       dest: /etc/dnsmasq.conf
       content: |
@@ -92,10 +91,9 @@
 
         dhcp-range={{ dhcp_range_start }},{{ dhcp_range_end }},12h
 
-        # Gateway
         dhcp-option=3,{{ gateway }}
 
-        # DNS -> UNBOUND (PRIMARY DNS)
+        # DNS = Unbound (THIS IS IMPORTANT)
         dhcp-option=6,{{ server_ip }}
 
         enable-tftp
@@ -110,7 +108,7 @@
       enabled: true
 
   # -------------------------
-  # TFTP SETUP
+  # TFTP + NETBOOT
   # -------------------------
   - name: Create TFTP directory
     file:
@@ -125,13 +123,26 @@
     delay: 3
 
   # -------------------------
-  # WEB SERVER
+  # NGINX (STATIC PXE FILES)
   # -------------------------
-  - name: Ensure Apache is running
+  - name: Ensure Nginx running
     systemd:
-      name: apache2
+      name: nginx
       state: started
       enabled: true
+
+  - name: Create PXE web root
+    file:
+      path: "{{ web_root }}"
+      state: directory
+
+  - name: Create iPXE boot script
+    copy:
+      dest: "{{ web_root }}/pxe.ipxe"
+      content: |
+        #!ipxe
+        dhcp
+        chain http://{{ server_ip }}:26000/iventoy.ipxe
 
   # -------------------------
   # IVPENTOY INSTALL
@@ -206,14 +217,3 @@
     retries: 10
     delay: 3
     until: iventoy_check.status == 200
-
-  # -------------------------
-  # PXE iPXE CHAIN
-  # -------------------------
-  - name: Create iPXE chain script
-    copy:
-      dest: "{{ web_root }}/pxe.ipxe"
-      content: |
-        #!ipxe
-        dhcp
-        chain http://{{ server_ip }}:26000/iventoy.ipxe
