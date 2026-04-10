@@ -1,5 +1,5 @@
 ---
-- name: FULL PXE INFRA (UNBOUND + NGINX + IVPENTOY + DNSMASQ)
+- name: ZERO-FAILURE PXE STACK (UNBOUND + NGINX + DNSMASQ + IVPENTOY)
   hosts: pxe_server
   become: true
   gather_facts: true
@@ -23,9 +23,9 @@
   tasks:
 
   # -------------------------
-  # PACKAGES
+  # BASE PACKAGES
   # -------------------------
-  - name: Install required packages
+  - name: Install dependencies
     apt:
       name:
         - dnsmasq
@@ -34,32 +34,60 @@
         - wget
         - curl
         - tar
+        - ufw
       state: present
       update_cache: yes
     retries: 5
     delay: 5
 
   # -------------------------
-  # REMOVE DNS CONFLICTS
+  # NETWORK / DNS FIX
   # -------------------------
   - name: Disable systemd-resolved
     systemd:
       name: systemd-resolved
       state: stopped
       enabled: false
-    ignore_errors: yes
+    ignore_errors: true
+
+  - name: Force resolv.conf to local DNS
+    copy:
+      dest: /etc/resolv.conf
+      content: |
+        nameserver 127.0.0.1
 
   # -------------------------
-  # UNBOUND DNS (PRIMARY)
+  # FIREWALL (CRITICAL)
   # -------------------------
-  - name: Configure Unbound DNS resolver
+  - name: Enable UFW
+    ufw:
+      state: enabled
+      policy: allow
+
+  - name: Allow PXE + DNS + HTTP ports
+    ufw:
+      rule: allow
+      port: "{{ item }}"
+      proto: any
+    loop:
+      - "53"
+      - "67"
+      - "69"
+      - "80"
+      - "26000"
+
+  # -------------------------
+  # UNBOUND DNS (HARDENED)
+  # -------------------------
+  - name: Configure Unbound
     copy:
       dest: /etc/unbound/unbound.conf.d/pxe.conf
       content: |
         server:
-          interface: 0.0.0.0
+          interface: 127.0.0.1
           port: 53
 
+          access-control: 127.0.0.0/8 allow
           access-control: {{ lan_cidr }} allow
 
           cache-size: 128m
@@ -80,9 +108,9 @@
       enabled: true
 
   # -------------------------
-  # DNSMASQ (DHCP + PXE)
+  # DNSMASQ (PXE + DHCP)
   # -------------------------
-  - name: Configure dnsmasq
+  - name: Configure dnsmasq PXE
     copy:
       dest: /etc/dnsmasq.conf
       content: |
@@ -90,16 +118,16 @@
         bind-interfaces
 
         dhcp-range={{ dhcp_range_start }},{{ dhcp_range_end }},12h
-
         dhcp-option=3,{{ gateway }}
 
-        # DNS = Unbound (PRIMARY DNS)
+        # DNS via Unbound (LOCAL)
         dhcp-option=6,{{ server_ip }}
 
         enable-tftp
         tftp-root={{ tftp_root }}
 
-        dhcp-boot=netboot.xyz.kpxe
+        # PXE boot to Nginx script (NOT direct netboot)
+        dhcp-boot=http://{{ server_ip }}/pxe.ipxe
 
   - name: Restart dnsmasq
     systemd:
@@ -108,7 +136,7 @@
       enabled: true
 
   # -------------------------
-  # TFTP + NETBOOT.XYZ
+  # TFTP + NETBOOT
   # -------------------------
   - name: Create TFTP directory
     file:
@@ -123,9 +151,9 @@
     delay: 3
 
   # -------------------------
-  # NGINX PXE WEB SERVER
+  # NGINX (PXE SAFE)
   # -------------------------
-  - name: Ensure web root exists
+  - name: Create web root
     file:
       path: "{{ web_root }}"
       state: directory
@@ -139,7 +167,8 @@
           server_name _;
 
           root /var/www/html;
-          index index.html;
+
+          index index.html pxe.ipxe;
 
           location / {
             autoindex on;
@@ -154,13 +183,13 @@
           }
         }
 
-  - name: Enable Nginx PXE site
+  - name: Enable Nginx site
     file:
       src: /etc/nginx/sites-available/pxe
       dest: /etc/nginx/sites-enabled/pxe
       state: link
 
-  - name: Disable default Nginx site
+  - name: Remove default Nginx site
     file:
       path: /etc/nginx/sites-enabled/default
       state: absent
@@ -172,7 +201,7 @@
       enabled: true
 
   # -------------------------
-  # iPXE SCRIPT
+  # PXE BOOT SCRIPT (ROBUST CHAIN)
   # -------------------------
   - name: Create PXE boot script
     copy:
@@ -180,7 +209,20 @@
       content: |
         #!ipxe
         dhcp
+        set base http://{{ server_ip }}
+
+        menu PXE Boot Menu
+        item iventoy iVentoy ISO Boot
+        item netboot Netboot.xyz
+        choose target
+
+        goto ${target}
+
+        :iventoy
         chain http://{{ server_ip }}:26000/iventoy.ipxe
+
+        :netboot
+        chain http://boot.netboot.xyz/ipxe/netboot.xyz.kpxe
 
   # -------------------------
   # IVPENTOY INSTALL
@@ -211,6 +253,11 @@
     with_fileglob:
       - "/tmp/iventoy-*/*"
 
+  - name: Ensure iVentoy executable
+    file:
+      path: "{{ iventoy_dir }}/iventoy.sh"
+      mode: "0755"
+
   - name: Create ISO directory
     file:
       path: "{{ iventoy_dir }}/iso"
@@ -219,7 +266,7 @@
   # -------------------------
   # IVPENTOY SERVICE
   # -------------------------
-  - name: Create systemd service for iVentoy
+  - name: Create systemd service
     copy:
       dest: /etc/systemd/system/iventoy.service
       content: |
@@ -247,11 +294,9 @@
   # -------------------------
   # HEALTH CHECK
   # -------------------------
-  - name: Wait for iVentoy web UI
+  - name: Wait for iVentoy UI
     uri:
       url: http://localhost:26000
       status_code: 200
-    register: iventoy_check
     retries: 10
     delay: 3
-    until: iventoy_check.status == 200
