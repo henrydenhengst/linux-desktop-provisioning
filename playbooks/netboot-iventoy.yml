@@ -1,5 +1,5 @@
 ---
-- name: ZERO-FAILURE PXE STACK (UNBOUND + NGINX + DNSMASQ + IVPENTOY)
+- name: PXE STACK (UNBOUND + NGINX + DNSMASQ + IVPENTOY)
   hosts: pxe_server
   become: true
   gather_facts: true
