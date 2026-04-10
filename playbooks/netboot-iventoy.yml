@@ -1,0 +1,107 @@
+---
+- name: Install and configure iVentoy PXE server
+  hosts: pxe_server
+  become: true
+
+  vars:
+    iventoy_install_dir: /opt/iventoy
+    iventoy_iso_dir: /opt/iventoy/iso
+    iventoy_url: https://github.com/ventoy/PXE/releases/latest/download/iventoy-linux-free.tar.gz
+    ipxe_web_root: /var/www/html
+    iventoy_ipxe_file: /var/www/html/iventoy.ipxe
+
+  tasks:
+
+    - name: Install dependencies
+      apt:
+        name:
+          - wget
+          - tar
+          - apache2
+        state: present
+        update_cache: yes
+
+    - name: Ensure install directory exists
+      file:
+        path: "{{ iventoy_install_dir }}"
+        state: directory
+        mode: '0755'
+
+    - name: Download iVentoy
+      get_url:
+        url: "{{ iventoy_url }}"
+        dest: /tmp/iventoy.tar.gz
+        mode: '0644'
+
+    - name: Extract iVentoy
+      unarchive:
+        src: /tmp/iventoy.tar.gz
+        dest: /tmp/
+        remote_src: yes
+
+    - name: Copy iVentoy files
+      copy:
+        src: "{{ item }}"
+        dest: "{{ iventoy_install_dir }}/"
+        remote_src: yes
+      with_fileglob:
+        - "/tmp/iventoy-*/*"
+
+    - name: Ensure ISO directory exists
+      file:
+        path: "{{ iventoy_iso_dir }}"
+        state: directory
+        mode: '0755'
+
+    - name: Get server IP
+      command: hostname -I
+      register: server_ip_raw
+
+    - name: Set server IP fact
+      set_fact:
+        server_ip: "{{ server_ip_raw.stdout.split()[0] }}"
+
+    - name: Create iPXE chain script
+      copy:
+        dest: "{{ iventoy_ipxe_file }}"
+        mode: '0644'
+        content: |
+          #!ipxe
+          dhcp
+          chain http://{{ server_ip }}:26000/iventoy.ipxe
+
+    - name: Create systemd service for iVentoy
+      copy:
+        dest: /etc/systemd/system/iventoy.service
+        mode: '0644'
+        content: |
+          [Unit]
+          Description=iVentoy PXE Server
+          After=network.target
+
+          [Service]
+          Type=simple
+          ExecStart={{ iventoy_install_dir }}/iventoy.sh start
+          ExecStop={{ iventoy_install_dir }}/iventoy.sh stop
+          Restart=always
+
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: Reload systemd
+      command: systemctl daemon-reexec
+
+    - name: Reload systemd daemon
+      command: systemctl daemon-reload
+
+    - name: Enable and start iVentoy
+      systemd:
+        name: iventoy
+        enabled: yes
+        state: started
+
+    - name: Ensure Apache is running
+      systemd:
+        name: apache2
+        enabled: yes
+        state: started
