@@ -1,69 +1,89 @@
 ---
-- name: FULL PXE STACK (netboot.xyz + iVentoy + DHCP + TFTP)
+- name: FULL PXE STACK + UNBOUND DNS
   hosts: pxe_server
   become: true
   gather_facts: true
 
   vars:
-    # AUTO interface (FIX: geen eth0 meer)
     interface: "{{ ansible_default_ipv4.interface }}"
+    server_ip: "{{ ansible_default_ipv4.address }}"
+    gateway: "{{ ansible_default_ipv4.gateway }}"
 
     dhcp_range_start: 192.168.1.100
     dhcp_range_end: 192.168.1.200
-    router: "{{ ansible_default_ipv4.gateway }}"
-    dns: 1.1.1.1
 
     tftp_root: /srv/tftp
     web_root: /var/www/html
 
-    iventoy_dir: /opt/iventoy
-    iventoy_iso_dir: /opt/iventoy/iso
+    dns_lan_cidr: 192.168.1.0/24
 
+    iventoy_dir: /opt/iventoy
     iventoy_url: https://github.com/ventoy/PXE/releases/latest/download/iventoy-linux-free.tar.gz
     netboot_url: https://boot.netboot.xyz/ipxe/netboot.xyz.kpxe
 
   tasks:
 
   # -------------------------
-  # BASE PACKAGES
+  # PACKAGES
   # -------------------------
-  - name: Install base packages (with retries)
+  - name: Install required packages
     apt:
       name:
         - dnsmasq
+        - unbound
         - apache2
         - wget
-        - tar
         - curl
+        - tar
       state: present
       update_cache: yes
-    register: apt_install
     retries: 5
     delay: 5
-    until: apt_install is succeeded
 
   # -------------------------
-  # TFTP SETUP
+  # DISABLE CONFLICTING DNS
   # -------------------------
-  - name: Create TFTP root
-    file:
-      path: "{{ tftp_root }}"
-      state: directory
-      mode: '0755'
-
-  - name: Download netboot.xyz (with retries)
-    get_url:
-      url: "{{ netboot_url }}"
-      dest: "{{ tftp_root }}/netboot.xyz.kpxe"
-    register: netboot_download
-    retries: 5
-    delay: 3
-    until: netboot_download is succeeded
+  - name: Stop systemd-resolved (avoid DNS conflict)
+    systemd:
+      name: systemd-resolved
+      state: stopped
+      enabled: false
+    ignore_errors: yes
 
   # -------------------------
-  # DHCP CONFIG
+  # UNBOUND CONFIG
   # -------------------------
-  - name: Configure dnsmasq (PXE DHCP + TFTP)
+  - name: Configure Unbound (Primary DNS)
+    copy:
+      dest: /etc/unbound/unbound.conf.d/pxe.conf
+      content: |
+        server:
+          interface: 0.0.0.0
+          port: 53
+
+          access-control: {{ dns_lan_cidr }} allow
+
+          cache-size: 128m
+          prefetch: yes
+
+          hide-identity: yes
+          hide-version: yes
+
+        forward-zone:
+          name: "."
+          forward-addr: 9.9.9.9
+          forward-addr: 149.112.112.112
+
+  - name: Restart Unbound
+    systemd:
+      name: unbound
+      state: restarted
+      enabled: true
+
+  # -------------------------
+  # DHCP / PXE (dnsmasq)
+  # -------------------------
+  - name: Configure dnsmasq for PXE
     copy:
       dest: /etc/dnsmasq.conf
       content: |
@@ -71,8 +91,12 @@
         bind-interfaces
 
         dhcp-range={{ dhcp_range_start }},{{ dhcp_range_end }},12h
-        dhcp-option=3,{{ router }}
-        dhcp-option=6,{{ dns }}
+
+        # Gateway
+        dhcp-option=3,{{ gateway }}
+
+        # DNS -> UNBOUND (PRIMARY DNS)
+        dhcp-option=6,{{ server_ip }}
 
         enable-tftp
         tftp-root={{ tftp_root }}
@@ -86,11 +110,28 @@
       enabled: true
 
   # -------------------------
-  # SERVER IP DETECTION
+  # TFTP SETUP
   # -------------------------
-  - name: Set server IP fact
-    set_fact:
-      server_ip: "{{ ansible_default_ipv4.address }}"
+  - name: Create TFTP directory
+    file:
+      path: "{{ tftp_root }}"
+      state: directory
+
+  - name: Download netboot.xyz
+    get_url:
+      url: "{{ netboot_url }}"
+      dest: "{{ tftp_root }}/netboot.xyz.kpxe"
+    retries: 5
+    delay: 3
+
+  # -------------------------
+  # WEB SERVER
+  # -------------------------
+  - name: Ensure Apache is running
+    systemd:
+      name: apache2
+      state: started
+      enabled: true
 
   # -------------------------
   # IVPENTOY INSTALL
@@ -100,14 +141,12 @@
       path: "{{ iventoy_dir }}"
       state: directory
 
-  - name: Download iVentoy (with retries)
+  - name: Download iVentoy
     get_url:
       url: "{{ iventoy_url }}"
       dest: /tmp/iventoy.tar.gz
-    register: iventoy_dl
     retries: 5
     delay: 5
-    until: iventoy_dl is succeeded
 
   - name: Extract iVentoy
     unarchive:
@@ -125,7 +164,7 @@
 
   - name: Create ISO directory
     file:
-      path: "{{ iventoy_iso_dir }}"
+      path: "{{ iventoy_dir }}/iso"
       state: directory
 
   # -------------------------
@@ -150,16 +189,16 @@
   - name: Reload systemd
     command: systemctl daemon-reload
 
-  - name: Start iVentoy service
+  - name: Start iVentoy
     systemd:
       name: iventoy
       state: started
       enabled: true
 
   # -------------------------
-  # HEALTH CHECK (FIXED)
+  # HEALTH CHECK
   # -------------------------
-  - name: Wait for iVentoy web UI (health check)
+  - name: Wait for iVentoy web UI
     uri:
       url: http://localhost:26000
       status_code: 200
@@ -169,21 +208,12 @@
     until: iventoy_check.status == 200
 
   # -------------------------
-  # IPXE CHAIN SCRIPT
+  # PXE iPXE CHAIN
   # -------------------------
   - name: Create iPXE chain script
     copy:
-      dest: "{{ web_root }}/iventoy.ipxe"
+      dest: "{{ web_root }}/pxe.ipxe"
       content: |
         #!ipxe
         dhcp
         chain http://{{ server_ip }}:26000/iventoy.ipxe
-
-  # -------------------------
-  # APACHE
-  # -------------------------
-  - name: Ensure Apache running
-    systemd:
-      name: apache2
-      state: started
-      enabled: true
