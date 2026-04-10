@@ -1,5 +1,5 @@
 ---
-- name: CLEAN PXE STACK (NGINX + UNBOUND + IVPENTOY)
+- name: FULL PXE INFRA (UNBOUND + NGINX + IVPENTOY + DNSMASQ)
   hosts: pxe_server
   become: true
   gather_facts: true
@@ -9,9 +9,9 @@
     server_ip: "{{ ansible_default_ipv4.address }}"
     gateway: "{{ ansible_default_ipv4.gateway }}"
 
+    lan_cidr: 192.168.1.0/24
     dhcp_range_start: 192.168.1.100
     dhcp_range_end: 192.168.1.200
-    lan_cidr: 192.168.1.0/24
 
     tftp_root: /srv/tftp
     web_root: /var/www/html
@@ -23,7 +23,7 @@
   tasks:
 
   # -------------------------
-  # BASE PACKAGES
+  # PACKAGES
   # -------------------------
   - name: Install required packages
     apt:
@@ -40,7 +40,7 @@
     delay: 5
 
   # -------------------------
-  # STOP CONFLICTING DNS
+  # REMOVE DNS CONFLICTS
   # -------------------------
   - name: Disable systemd-resolved
     systemd:
@@ -52,7 +52,7 @@
   # -------------------------
   # UNBOUND DNS (PRIMARY)
   # -------------------------
-  - name: Configure Unbound DNS
+  - name: Configure Unbound DNS resolver
     copy:
       dest: /etc/unbound/unbound.conf.d/pxe.conf
       content: |
@@ -93,7 +93,7 @@
 
         dhcp-option=3,{{ gateway }}
 
-        # DNS = Unbound (THIS IS IMPORTANT)
+        # DNS = Unbound (PRIMARY DNS)
         dhcp-option=6,{{ server_ip }}
 
         enable-tftp
@@ -108,7 +108,7 @@
       enabled: true
 
   # -------------------------
-  # TFTP + NETBOOT
+  # TFTP + NETBOOT.XYZ
   # -------------------------
   - name: Create TFTP directory
     file:
@@ -123,20 +123,58 @@
     delay: 3
 
   # -------------------------
-  # NGINX (STATIC PXE FILES)
+  # NGINX PXE WEB SERVER
   # -------------------------
-  - name: Ensure Nginx running
-    systemd:
-      name: nginx
-      state: started
-      enabled: true
-
-  - name: Create PXE web root
+  - name: Ensure web root exists
     file:
       path: "{{ web_root }}"
       state: directory
 
-  - name: Create iPXE boot script
+  - name: Configure Nginx PXE site
+    copy:
+      dest: /etc/nginx/sites-available/pxe
+      content: |
+        server {
+          listen 80;
+          server_name _;
+
+          root /var/www/html;
+          index index.html;
+
+          location / {
+            autoindex on;
+          }
+
+          location ~* \.ipxe$ {
+            default_type text/plain;
+          }
+
+          location ~* \.kpxe$ {
+            default_type application/octet-stream;
+          }
+        }
+
+  - name: Enable Nginx PXE site
+    file:
+      src: /etc/nginx/sites-available/pxe
+      dest: /etc/nginx/sites-enabled/pxe
+      state: link
+
+  - name: Disable default Nginx site
+    file:
+      path: /etc/nginx/sites-enabled/default
+      state: absent
+
+  - name: Restart Nginx
+    systemd:
+      name: nginx
+      state: restarted
+      enabled: true
+
+  # -------------------------
+  # iPXE SCRIPT
+  # -------------------------
+  - name: Create PXE boot script
     copy:
       dest: "{{ web_root }}/pxe.ipxe"
       content: |
