@@ -1,5 +1,5 @@
 ---
-- name: PXE STACK (UNBOUND + NGINX + DNSMASQ + IVPENTOY)
+- name: PXE STACK (NETBOOT+ IVENTOY)
   hosts: pxe_server
   become: true
   gather_facts: true
@@ -18,13 +18,14 @@
 
     iventoy_dir: /opt/iventoy
     iventoy_url: https://github.com/ventoy/PXE/releases/latest/download/iventoy-linux-free.tar.gz
-    netboot_url: https://boot.netboot.xyz/ipxe/netboot.xyz.kpxe
+    netboot_kpxe: https://boot.netboot.xyz/ipxe/netboot.xyz.kpxe
+    netboot_efi: https://boot.netboot.xyz/ipxe/netboot.xyz.efi
 
+  # -------------------------
+  # PACKAGES (RESILIENT)
+  # -------------------------
   tasks:
 
-  # -------------------------
-  # BASE PACKAGES
-  # -------------------------
   - name: Install dependencies
     apt:
       name:
@@ -35,13 +36,14 @@
         - curl
         - tar
         - ufw
+        - ipxe
       state: present
       update_cache: yes
-    retries: 5
+    retries: 10
     delay: 5
 
   # -------------------------
-  # NETWORK / DNS FIX
+  # DNS FIX (CRITICAL)
   # -------------------------
   - name: Disable systemd-resolved
     systemd:
@@ -50,34 +52,35 @@
       enabled: false
     ignore_errors: true
 
-  - name: Force resolv.conf to local DNS
+  - name: Force resolv.conf
     copy:
       dest: /etc/resolv.conf
       content: |
         nameserver 127.0.0.1
 
   # -------------------------
-  # FIREWALL (CRITICAL)
+  # FIREWALL SAFE MODE
   # -------------------------
-  - name: Enable UFW
+  - name: Enable UFW safe baseline
     ufw:
       state: enabled
-      policy: allow
+      policy: deny
 
-  - name: Allow PXE + DNS + HTTP ports
+  - name: Allow required PXE ports
     ufw:
       rule: allow
-      port: "{{ item }}"
-      proto: any
+      port: "{{ item.port }}"
+      proto: "{{ item.proto }}"
     loop:
-      - "53"
-      - "67"
-      - "69"
-      - "80"
-      - "26000"
+      - { port: "53", proto: "udp" }
+      - { port: "53", proto: "tcp" }
+      - { port: "67", proto: "udp" }
+      - { port: "69", proto: "udp" }
+      - { port: "80", proto: "tcp" }
+      - { port: "26000", proto: "tcp" }
 
   # -------------------------
-  # UNBOUND DNS (HARDENED)
+  # UNBOUND (HARDENED + STABLE)
   # -------------------------
   - name: Configure Unbound
     copy:
@@ -90,27 +93,33 @@
           access-control: 127.0.0.0/8 allow
           access-control: {{ lan_cidr }} allow
 
-          cache-size: 128m
           prefetch: yes
+          cache-size: 256m
 
           hide-identity: yes
           hide-version: yes
 
         forward-zone:
           name: "."
+          forward-addr: 1.1.1.1
           forward-addr: 9.9.9.9
-          forward-addr: 149.112.112.112
 
-  - name: Restart Unbound
+  - name: Restart Unbound (must be ready first)
     systemd:
       name: unbound
       state: restarted
       enabled: true
 
+  - name: Wait for DNS port
+    wait_for:
+      port: 53
+      host: 127.0.0.1
+      timeout: 30
+
   # -------------------------
-  # DNSMASQ (PXE + DHCP)
+  # DNSMASQ (BIOS + UEFI FIXED)
   # -------------------------
-  - name: Configure dnsmasq PXE
+  - name: Configure dnsmasq PXE dual boot
     copy:
       dest: /etc/dnsmasq.conf
       content: |
@@ -120,14 +129,23 @@
         dhcp-range={{ dhcp_range_start }},{{ dhcp_range_end }},12h
         dhcp-option=3,{{ gateway }}
 
-        # DNS via Unbound (LOCAL)
         dhcp-option=6,{{ server_ip }}
 
         enable-tftp
         tftp-root={{ tftp_root }}
 
-        # PXE boot to Nginx script (NOT direct netboot)
-        dhcp-boot=http://{{ server_ip }}/pxe.ipxe
+        # BIOS / UEFI detection
+        dhcp-match=set:bios,option:client-arch,0
+        dhcp-match=set:uefi64,option:client-arch,7
+
+        # BIOS boot
+        dhcp-boot=tag:bios,netboot.xyz.kpxe
+
+        # UEFI boot
+        dhcp-boot=tag:uefi64,netboot.xyz.efi
+
+        # fallback
+        dhcp-boot=netboot.xyz.kpxe
 
   - name: Restart dnsmasq
     systemd:
@@ -135,37 +153,48 @@
       state: restarted
       enabled: true
 
+  - name: Wait for DHCP service
+    wait_for:
+      port: 67
+      delay: 2
+      timeout: 30
+
   # -------------------------
-  # TFTP + NETBOOT
+  # TFTP + NETBOOT FILES
   # -------------------------
   - name: Create TFTP directory
     file:
       path: "{{ tftp_root }}"
       state: directory
 
-  - name: Download netboot.xyz
+  - name: Download netboot BIOS
     get_url:
-      url: "{{ netboot_url }}"
+      url: "{{ netboot_kpxe }}"
       dest: "{{ tftp_root }}/netboot.xyz.kpxe"
-    retries: 5
-    delay: 3
+    retries: 10
+    delay: 5
+
+  - name: Download netboot UEFI
+    get_url:
+      url: "{{ netboot_efi }}"
+      dest: "{{ tftp_root }}/netboot.xyz.efi"
+    retries: 10
+    delay: 5
 
   # -------------------------
-  # NGINX (PXE SAFE)
+  # NGINX SAFE CONFIG
   # -------------------------
   - name: Create web root
     file:
       path: "{{ web_root }}"
       state: directory
 
-  - name: Configure Nginx PXE site
+  - name: Configure Nginx PXE
     copy:
       dest: /etc/nginx/sites-available/pxe
       content: |
         server {
           listen 80;
-          server_name _;
-
           root /var/www/html;
 
           index index.html pxe.ipxe;
@@ -177,10 +206,6 @@
           location ~* \.ipxe$ {
             default_type text/plain;
           }
-
-          location ~* \.kpxe$ {
-            default_type application/octet-stream;
-          }
         }
 
   - name: Enable Nginx site
@@ -189,7 +214,7 @@
       dest: /etc/nginx/sites-enabled/pxe
       state: link
 
-  - name: Remove default Nginx site
+  - name: Remove default site
     file:
       path: /etc/nginx/sites-enabled/default
       state: absent
@@ -201,33 +226,31 @@
       enabled: true
 
   # -------------------------
-  # PXE BOOT SCRIPT (ROBUST CHAIN)
+  # PXE MENU (ROBUST)
   # -------------------------
-  - name: Create PXE boot script
+  - name: Create PXE menu
     copy:
       dest: "{{ web_root }}/pxe.ipxe"
       content: |
         #!ipxe
         dhcp
-        set base http://{{ server_ip }}
-
-        menu PXE Boot Menu
-        item iventoy iVentoy ISO Boot
+        menu PXE MENU
         item netboot Netboot.xyz
+        item iventoy iVentoy
         choose target
 
         goto ${target}
 
-        :iventoy
-        chain http://{{ server_ip }}:26000/iventoy.ipxe
-
         :netboot
         chain http://boot.netboot.xyz/ipxe/netboot.xyz.kpxe
 
+        :iventoy
+        chain http://{{ server_ip }}:26000/iventoy.ipxe
+
   # -------------------------
-  # IVPENTOY INSTALL
+  # IVPENTOY SAFE INSTALL
   # -------------------------
-  - name: Create iVentoy directory
+  - name: Create iVentoy dir
     file:
       path: "{{ iventoy_dir }}"
       state: directory
@@ -236,7 +259,7 @@
     get_url:
       url: "{{ iventoy_url }}"
       dest: /tmp/iventoy.tar.gz
-    retries: 5
+    retries: 10
     delay: 5
 
   - name: Extract iVentoy
@@ -245,38 +268,31 @@
       dest: /tmp/
       remote_src: yes
 
-  - name: Copy iVentoy files
-    copy:
-      src: "{{ item }}"
-      dest: "{{ iventoy_dir }}/"
-      remote_src: yes
-    with_fileglob:
-      - "/tmp/iventoy-*/*"
+  - name: Copy iVentoy files safely
+    shell: |
+      cp -r /tmp/iventoy-*/* {{ iventoy_dir }}/
+    args:
+      creates: "{{ iventoy_dir }}/iventoy.sh"
 
-  - name: Ensure iVentoy executable
+  - name: Fix permissions
     file:
       path: "{{ iventoy_dir }}/iventoy.sh"
       mode: "0755"
 
-  - name: Create ISO directory
-    file:
-      path: "{{ iventoy_dir }}/iso"
-      state: directory
-
   # -------------------------
   # IVPENTOY SERVICE
   # -------------------------
-  - name: Create systemd service
+  - name: systemd service
     copy:
       dest: /etc/systemd/system/iventoy.service
       content: |
         [Unit]
-        Description=iVentoy PXE Server
-        After=network.target
+        Description=iVentoy
+        After=network-online.target
+        Wants=network-online.target
 
         [Service]
         ExecStart={{ iventoy_dir }}/iventoy.sh start
-        ExecStop={{ iventoy_dir }}/iventoy.sh stop
         Restart=always
 
         [Install]
@@ -291,12 +307,9 @@
       state: started
       enabled: true
 
-  # -------------------------
-  # HEALTH CHECK
-  # -------------------------
-  - name: Wait for iVentoy UI
+  - name: Wait for iVentoy HTTP
     uri:
       url: http://localhost:26000
       status_code: 200
-    retries: 10
+    retries: 20
     delay: 3
